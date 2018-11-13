@@ -1,0 +1,64 @@
+#!/bin/sh -e
+## Parse logs and record the frequency of messages per day
+#
+# TODO:
+# - Give this script a better user interface
+# - Integrate with summarize.awk
+#
+progname=`basename "$0"`
+progdir=`dirname "$0"`
+progdir=`readlink -f "$progdir"`
+
+# Create the working directory
+# TODO: Make this a command line and/or configuration option
+test -d "$TMPDIR" || TMPDIR=/tmp
+logdir=$TMPDIR/idp-warn
+mkdir -p "$logdir" && cd "$logdir"
+
+# Gather log files
+# TODO: Pass flags from this command to `collect'
+mkdir -p logs
+"$progdir"/collect -fwd "$logdir/logs"
+
+# Enumerate all the unique log messages
+# TODO:
+# 1. Cache the results of parsing (can take a long time)
+# 2. Replace sed with a filter specified in a config file
+#
+#   [file "error" "warn" "audit" "consent"]
+#   message-filter = sed -n 's/.*\(SEVERE\|ERROR\|WARN\).*] - \(.\{1,\}\)/\2/p'
+#
+cat >messages <<EOF
+#
+# Edit this list to remove redundancies, save, and then quit
+#
+EOF
+sed -n 's/.*\(SEVERE\|ERROR\|WARN\).*] - \(.\{1,\}\)/\2/p' logs/* \
+    | sort -u >>messages
+
+# Interactively edit the ERROR / WARN message list
+${VISUAL-${EDITOR-vi}} messages
+sed -i -e '/^[ 	]*#/d' -e '/^[ 	]*$/d' messages
+
+# Determine frequency of each search string in each log
+mkdir -p results
+"$progdir"/freq -f messages -d results logs/*
+
+# Grab the dates from the name of each log file
+# TODO: Replace sed with a filter specified in a config file
+#
+#   [file "error" "warn" "audit" "consent"]
+#   date-filter = sed -e 's/idp-warn-....-0\{0,1\}//g' -e 's/-/\//g' -e 's/\.log//g'
+#
+cd logs
+dates=`echo * | sed -e 's/idp-warn-....-0\{0,1\}//g' -e 's/-/\//g' -e 's/\.log//g'`
+
+# Create a header row from these dates
+cd ..
+for d in $dates
+do printf "$d"'\t'
+done | sed 's/\t$/\n/' >summary.tsv
+
+# Combine data
+paste results/* messages >>summary.tsv
+echo "Output stored in $logdir"
