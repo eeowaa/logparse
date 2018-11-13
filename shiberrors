@@ -1,0 +1,50 @@
+#!/bin/sh -e
+## [SHIB] Parse Shibboleth warning logs for errors
+#
+# TODO:
+# - Give this script a better user interface
+# - Integrate with shiberrors.awk
+#
+progname=`basename "$0"`
+progdir=`dirname "$0"`
+progdir=`readlink -f "$progdir"`
+
+# Create the working directory
+test -d "$TMPDIR" || TMPDIR=/tmp
+logdir=$TMPDIR/idp-warn
+mkdir -p "$logdir" && cd "$logdir"
+
+# Gather Shibboleth error logs
+mkdir -p logs
+"$progdir"/shiblogs -fwd "$logdir/logs"
+
+# Enumerate all the unique ERROR and WARN messages
+cat >errors.conf <<EOF
+#
+# Edit this list to remove redundancies, save, and then quit
+#
+EOF
+sed -n 's/.*\(SEVERE\|ERROR\|WARN\).*] - \(.\{1,\}\)/\2/p' logs/* \
+    | sort -u >>errors.conf
+
+# Interactively edit the ERROR / WARN message list
+${VISUAL-${EDITOR-vi}} errors.conf
+sed -i -e '/^[ 	]*#/d' -e '/^[ 	]*$/d' errors.conf
+
+# Determine frequency of each search string in each log
+mkdir -p results
+"$progdir"/freq -f errors.conf -d results logs/*
+
+# Grab the dates from the name of each log file
+cd logs
+dates=`echo * | sed -e 's/idp-warn-....-0\{0,1\}//g' -e 's/-/\//g' -e 's/\.log//g'`
+
+# Create a header row from these dates
+cd ..
+for d in $dates
+do printf "$d"'\t'
+done | sed 's/\t$/\n/' >errors.tsv
+
+# Combine data
+paste results/* errors.conf >>errors.tsv
+echo "Output stored in $logdir"

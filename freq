@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+## [TEXT] Determine frequency of each search string in each log
+
+function die {
+    case $# in
+    0) [ -t 0 ] || cat ;;
+    *) echo "$*" ;;
+    esac >&2
+    exit 1
+}
+
+readonly progname=${0##*/}
+readonly usage="Usage: $progname -f INFILE [-d OUTDIR] [-s SUFFIX] [FILE]..."
+
+unset infile
+outdir=. suffix=.n
+while getopts :f:d:s: o
+do
+    case $o in
+    f) infile=$OPTARG ;;
+    d) outdir=$OPTARG ;;
+    s) suffix=$OPTARG ;;
+    ?) cat >&2 <<EOF
+$usage
+
+* INFILE contains one search string per line
+* OUTDIR is where the output files go (default = \$PWD)
+* SUFFIX is appended to each output file name (default = .n)
+* Each FILE (default = /dev/stdin) is checked for each search string in INFILE
+EOF
+       exit 2 ;;
+    esac
+done
+[ "$infile" ] || die <<EOF
+$progname: missing required argument: INFILE
+$usage
+EOF
+[ -f "$infile" -a -r "$infile" ] || die "$infile: not a readable file"
+[ -d "$outdir" -a -w "$outdir" ] || die "$outdir: not a writable directory"
+
+# Create an awk script to initialize the count of each error to 0
+awkinit=$(mktemp)
+trap "rm -f '$awkinit'" EXIT HUP INT QUIT TERM
+sed -e 's/"/\\"/g' \
+    -e 's/^.*$/    count["&"] = 0/' \
+    -e '1s/^/BEGIN {\n/' \
+    -e '$s/$/\n}/' "$infile" >"$awkinit"
+
+# For each file
+shift $(($OPTIND - 1))
+[ $# -eq 0 ] && set -- /dev/stdin
+for file;
+do
+    printf "$file: "
+    [ -f "$file" -a -r "$file" ] || {
+        echo 'not a readable file'
+        continue
+    }
+
+    # Record the frequency of each error
+    awk -f "$awkinit" -e '
+{
+    for (error in count) {
+        if (index($0, error)) {
+            count[error]++
+            next
+        }
+    }
+}
+END {
+    # Print counts in order of errors supplied in $infile
+    while (getline error <INFILE)
+        print count[error]
+}' INFILE="$infile" "$file" >"$outdir/${file##*/}$suffix"
+    echo 'done'
+done >&2

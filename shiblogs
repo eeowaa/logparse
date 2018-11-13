@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+## [SHIB] Gather Shibboleth error logs
+
+function die {
+    echo >&2 "$*"
+    exit 1
+}
+
+readonly progname=${0##*/}
+readonly usage="Usage: $progname [-d OUTDIR] [-pwac] [-ntf]"
+outdir=.
+
+declare -A log opt
+while getopts :d:pwacntf o
+do
+    case $o in
+    d) outdir=$OPTARG ;;
+    p) log[p]=process ;;
+    w) log[w]=warn ;;
+    a) log[a]=audit ;;
+    c) log[c]=consent-audit ;;
+    [nt]) opt[$o]=1 ;;
+    f) opt[f]=-f ;;
+    ?) cat >&2 <<EOF
+$usage
+
+OUTDIR is the directory to copy the Shibboleth logs into
+(default is current working directory)
+
+LOG TYPES
+ -p    process logs (default)
+ -w    warn logs
+ -a    audit logs
+ -c    consent logs
+
+OTHER FLAGS
+ -n    do not rename or decompress copied files
+ -t    only transfer today's log(s) to OUTDIR (always overwrites)
+ -f    force-overwrite all logs in OUTDIR
+EOF
+    exit 2 ;;
+    esac
+done
+[ ${#log[@]} -eq 0 ] && log[p]=process
+
+# Check for excess arguments
+shift $(($OPTIND - 1))
+[ $# -eq 0 ] || die "$usage"
+
+logdir=${IDP_HOME?}/logs
+[ -d "$logdir" -a -r "$logdir" ] || die "$logdir: not a readable directory"
+[ -d "$outdir" -a -w "$outdir" ] || die "$outdir: not a writable directory"
+
+# For checking the existence of log.gz files
+shopt -s nullglob
+shopt -u failglob
+
+date=$(date +%F)
+for i in "${!log[@]}"
+do
+    # Transfer files
+    if [ "${opt[t]}" ]
+    then cp -f "$logdir"/idp-${log[$i]}.log "$outdir"
+    else cp ${opt[f]--n} "$logdir"/idp-${log[$i]}* "$outdir"
+    fi
+
+    # Rename and/or decompress files
+    [ "${opt[n]}" ] || {
+        mv "$outdir"/idp-${log[$i]}.log "$outdir"/idp-${log[$i]}-${date}.log
+
+        # Check for existence of log.gz files
+        [ "$(echo "$outdir"/idp-${log[$i]}*.log.gz)" ] &&
+            echo n | gunzip ${opt[f]} "$outdir"/idp-${log[$i]}*.log.gz
+    }
+done
