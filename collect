@@ -1,11 +1,39 @@
 #!/usr/bin/env bash
-## [SHIB] Gather Shibboleth error logs
+## Gather files (e.g. logs) into one place
 
 function die {
     echo >&2 "$*"
     exit 1
 }
 
+# TODO: Replace [-pwac] with options specified in config file
+#
+# - Default location: ~/.collect.ini
+#   - Should be able to specify with an environment variable
+#
+# - Example content:
+#
+#   [file "process"]
+#   default = true
+#   description = process logs (default)
+#   glob = /opt/shibboleth-idp/logs/idp-process*
+#   flag = p
+#
+#   [file "warn"]
+#   description = warn logs
+#   glob = /opt/shibboleth-idp/logs/idp-warn*
+#   flag = w
+#
+#   [file "audit"]
+#   description = audit logs
+#   glob = /opt/shibboleth-idp/logs/idp-audit*
+#   flag = a
+#
+#   [file "consent"]
+#   description = consent logs
+#   glob = /opt/shibboleth-idp/logs/idp-consent-audit*
+#   flag = c
+#
 readonly progname=${0##*/}
 readonly usage="Usage: $progname [-d OUTDIR] [-pwac] [-ntf]"
 outdir=.
@@ -47,6 +75,7 @@ done
 shift $(($OPTIND - 1))
 [ $# -eq 0 ] || die "$usage"
 
+# TODO: Remove check for logdir
 logdir=${IDP_HOME?}/logs
 [ -d "$logdir" -a -r "$logdir" ] || die "$logdir: not a readable directory"
 [ -d "$outdir" -a -w "$outdir" ] || die "$outdir: not a writable directory"
@@ -55,10 +84,12 @@ logdir=${IDP_HOME?}/logs
 shopt -s nullglob
 shopt -u failglob
 
+# TODO: Cycle through each [file] section of config file
 date=$(date +%F)
 for i in "${!log[@]}"
 do
     # Transfer files
+    # TODO: Replace with rsync
     if [ "${opt[t]}" ]
     then cp -f "$logdir"/idp-${log[$i]}.log "$outdir"
     else cp ${opt[f]--n} "$logdir"/idp-${log[$i]}* "$outdir"
@@ -69,6 +100,7 @@ do
         mv "$outdir"/idp-${log[$i]}.log "$outdir"/idp-${log[$i]}-${date}.log
 
         # Check for existence of log.gz files
+        # TODO: Make this a check for something in the config file
         [ "$(echo "$outdir"/idp-${log[$i]}*.log.gz)" ] &&
             echo n | gunzip ${opt[f]} "$outdir"/idp-${log[$i]}*.log.gz
     }
